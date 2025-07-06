@@ -35,7 +35,7 @@ SecurePass is a lightweight, client-side password generator built with **React**
 
 ## 🚀 Live Demo
 
-> _(To be added after deployment — e.g. via Vercel or Netlify)_
+https://secure-pass-pied.vercel.app/
 
 ---
 
