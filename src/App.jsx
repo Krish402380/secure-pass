@@ -1,172 +1,122 @@
-import React, { useState } from "react";
+// src/App.jsx
+import React from "react";
+import { ShieldCheck, RefreshCcw, ClipboardCopy } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
+import { Card, CardContent } from "@/components/ui/card";
+import { useState } from "react";
 
-// Character pools
-const UPPERCASE = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-const LOWERCASE = "abcdefghijklmnopqrstuvwxyz";
-const NUMBERS = "0123456789";
-const SYMBOLS = "!@#$%^&*()_+[]{}|;:,.<>?";
+import "./App.css";
 
-export default function App() {
+function PasswordStrengthBar({ strength }) {
+  const width = `${Math.min(strength, 100)}%`;
+  const bg = strength >= 80 ? "bg-green-500" : strength >= 50 ? "bg-yellow-500" : "bg-red-500";
+
+  return (
+    <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
+      <div className={`h-full transition-all duration-300 ease-in-out ${bg}`} style={{ width }}></div>
+    </div>
+  );
+}
+
+function App() {
   const [length, setLength] = useState(16);
   const [includeUppercase, setIncludeUppercase] = useState(true);
   const [includeLowercase, setIncludeLowercase] = useState(true);
   const [includeNumbers, setIncludeNumbers] = useState(true);
   const [includeSymbols, setIncludeSymbols] = useState(true);
   const [password, setPassword] = useState("");
+  const [strength, setStrength] = useState(0);
 
-  function generatePassword() {
+  const generatePassword = () => {
     let charset = "";
-    if (includeUppercase) charset += UPPERCASE;
-    if (includeLowercase) charset += LOWERCASE;
-    if (includeNumbers) charset += NUMBERS;
-    if (includeSymbols) charset += SYMBOLS;
+    if (includeUppercase) charset += "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    if (includeLowercase) charset += "abcdefghijklmnopqrstuvwxyz";
+    if (includeNumbers) charset += "0123456789";
+    if (includeSymbols) charset += "!@#$%^&*()_+-=[]{}|;:',.<>/?";
 
-    if (!charset) return setPassword("❌ No charset selected");
+    if (!charset) return;
 
-    let pass = "";
+    let pwd = "";
     for (let i = 0; i < length; i++) {
-      const index = Math.floor(Math.random() * charset.length);
-      pass += charset[index];
+      const randomIndex = Math.floor(Math.random() * charset.length);
+      pwd += charset[randomIndex];
     }
-    setPassword(pass);
-  }
+    setPassword(pwd);
+    const bits = Math.round(length * Math.log2(charset.length));
+    setStrength(bits > 128 ? 100 : Math.round((bits / 128) * 100));
+  };
 
-  function calculateEntropy() {
-    let poolSize = 0;
-    if (includeUppercase) poolSize += UPPERCASE.length;
-    if (includeLowercase) poolSize += LOWERCASE.length;
-    if (includeNumbers) poolSize += NUMBERS.length;
-    if (includeSymbols) poolSize += SYMBOLS.length;
-
-    return Math.round(length * Math.log2(poolSize));
-  }
-
-  function entropyStrength() {
-    const entropy = calculateEntropy();
-    if (entropy >= 128) return { label: "Very Strong", color: "bg-green-600" };
-    if (entropy >= 100) return { label: "Strong", color: "bg-green-500" };
-    if (entropy >= 60) return { label: "Moderate", color: "bg-yellow-500" };
-    if (entropy >= 40) return { label: "Weak", color: "bg-orange-500" };
-    return { label: "Very Weak", color: "bg-red-500" };
-  }
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(password);
+  };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-white px-4">
-      <div className="w-full max-w-xl bg-white p-6 sm:p-10 rounded-xl shadow-lg space-y-6 text-center">
-        <h1 className="text-3xl font-bold text-indigo-600">
-          🔐 SecurePass Generator
-        </h1>
-
-        {/* Length Controls */}
-        <div className="flex flex-col items-center gap-2">
+    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <Card className="w-full max-w-xl shadow-xl rounded-2xl">
+        <CardContent className="p-6 space-y-6">
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setLength(Math.max(length - 1, 4))}
-              className="w-8 h-8 bg-gray-300 rounded-full font-bold text-black"
-            >
-              –
-            </button>
+            <ShieldCheck className="h-10 w-10 text-primary" />
+            <div>
+              <h1 className="text-2xl font-bold font-headline text-foreground">PassForge</h1>
+              <p className="text-muted-foreground">Your secure password workspace.</p>
+            </div>
+          </div>
+
+          <div className="relative">
             <input
-              type="range"
-              min={4}
-              max={64}
-              value={length}
-              onChange={(e) => setLength(Number(e.target.value))}
-              className="w-64 accent-indigo-500"
+              readOnly
+              className="w-full p-3 pr-10 text-lg font-mono border rounded-lg bg-muted/20 text-foreground"
+              value={password}
+              placeholder="Your secure password"
             />
-            <button
-              onClick={() => setLength(Math.min(length + 1, 64))}
-              className="w-8 h-8 bg-gray-300 rounded-full font-bold text-black"
-            >
-              +
+            <button onClick={copyToClipboard} className="absolute right-3 top-1/2 -translate-y-1/2">
+              <ClipboardCopy className="w-5 h-5 text-muted-foreground" />
             </button>
           </div>
-          <span className="text-sm">
-            Password Length: <strong>{length}</strong>
-          </span>
-        </div>
 
-        {/* Character Options */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm text-left">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={includeUppercase}
-              onChange={() => setIncludeUppercase(!includeUppercase)}
-            />
-            Include Uppercase (A–Z)
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={includeLowercase}
-              onChange={() => setIncludeLowercase(!includeLowercase)}
-            />
-            Include Lowercase (a–z)
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={includeNumbers}
-              onChange={() => setIncludeNumbers(!includeNumbers)}
-            />
-            Include Numbers (0–9)
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={includeSymbols}
-              onChange={() => setIncludeSymbols(!includeSymbols)}
-            />
-            Include Symbols (!@#$)
-          </label>
-        </div>
-
-        {/* Entropy */}
-        <div className="space-y-1">
-          <p className="text-sm text-gray-600">
-            Entropy: {calculateEntropy()} bits –{" "}
-            <strong>{entropyStrength().label}</strong>
-          </p>
-          <div className="w-full bg-gray-300 h-2 rounded">
-            <div
-              className={`${entropyStrength().color} h-2 rounded`}
-              style={{ width: `${Math.min(calculateEntropy() / 1.3, 100)}%` }}
-            />
+          <div className="space-y-1">
+            <PasswordStrengthBar strength={strength} />
+            <div className="text-right text-sm text-muted-foreground">
+              {strength > 80 ? "Very Strong" : strength > 50 ? "Strong" : strength > 30 ? "Weak" : "Very Weak"}
+            </div>
           </div>
-        </div>
 
-        {/* Password Output */}
-        <div
-          onClick={(e) => {
-            const range = document.createRange();
-            range.selectNode(e.target);
-            window.getSelection().removeAllRanges();
-            window.getSelection().addRange(range);
-          }}
-          className="w-full bg-zinc-100 text-black text-center font-mono text-2xl py-4 px-6 rounded shadow-inner cursor-pointer select-text"
-        >
-          {password || "🔐 Password will appear here"}
-        </div>
+          <div>
+            <label className="text-sm text-muted-foreground">Password Length</label>
+            <div className="flex items-center justify-between">
+              <Slider value={[length]} onValueChange={([val]) => setLength(val)} min={4} max={64} className="w-full" />
+              <span className="ml-3 text-sm text-primary font-bold w-6 text-right">{length}</span>
+            </div>
+          </div>
 
-        {/* Buttons */}
-        <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
-          <button
-            onClick={generatePassword}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded font-semibold shadow"
-          >
-            🔁 Generate
-          </button>
-          {password && (
-            <button
-              onClick={() => navigator.clipboard.writeText(password)}
-              className="text-indigo-600 hover:underline text-sm"
-            >
-              📋 Copy to clipboard
-            </button>
-          )}
-        </div>
-      </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm text-muted-foreground">
+            <div className="flex items-center justify-between">
+              <span>Uppercase (A–Z)</span>
+              <Switch checked={includeUppercase} onCheckedChange={setIncludeUppercase} />
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Lowercase (a–z)</span>
+              <Switch checked={includeLowercase} onCheckedChange={setIncludeLowercase} />
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Numbers (0–9)</span>
+              <Switch checked={includeNumbers} onCheckedChange={setIncludeNumbers} />
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Symbols (!@#...)</span>
+              <Switch checked={includeSymbols} onCheckedChange={setIncludeSymbols} />
+            </div>
+          </div>
+
+          <Button onClick={generatePassword} className="w-full text-base font-semibold">
+            <RefreshCcw className="w-4 h-4 mr-2" /> Generate New
+          </Button>
+        </CardContent>
+      </Card>
     </div>
   );
 }
+
+export default App;
