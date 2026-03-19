@@ -1,113 +1,309 @@
 // src/App.jsx
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import "./App.css";
 
-const STRENGTH_STATES = [
-  { min: 80, label: "Rock solid", gradient: "linear-gradient(90deg, #34d399, #22d3ee, #8b5cf6)", hint: "Ready for your most important accounts" },
-  { min: 55, label: "Strong", gradient: "linear-gradient(90deg, #38bdf8, #4f46e5)", hint: "Great mix of length and variety" },
-  { min: 35, label: "Okay", gradient: "linear-gradient(90deg, #f59e0b, #f97316, #fb7185)", hint: "Add symbols or length for extra safety" },
-  { min: 1, label: "Weak", gradient: "linear-gradient(90deg, #fb7185, #f97316)", hint: "Increase the length and enable more sets" },
-  { min: 0, label: "Awaiting options", gradient: "linear-gradient(90deg, #475569, #334155)", hint: "Pick at least one character set to start" },
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+const ENTROPY_TIERS = [
+  { min: 80, label: "Unbreakable", color: "#10b981", hint: "Ready for your most critical accounts" },
+  { min: 60, label: "Strong",      color: "#22d3ee", hint: "Great mix of length and variety" },
+  { min: 40, label: "Fair",        color: "#f59e0b", hint: "Add more length or character sets for safety" },
+  { min: 1,  label: "Weak",        color: "#ef4444", hint: "Increase length and enable more sets" },
+  { min: 0,  label: "—",           color: "#475569", hint: "Pick at least one character set to start" },
 ];
 
-const characterSets = {
+const CHARACTER_SETS = {
   uppercase: "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
   lowercase: "abcdefghijklmnopqrstuvwxyz",
-  numbers: "0123456789",
-  symbols: "!@#$%^&*()_+-=[]{}|;:',.<>/?",
+  numbers:   "0123456789",
+  symbols:   "!@#$%^&*()_+-=[]{}|;:',.<>/?",
 };
 
-function PasswordStrengthBar({ score }) {
-  const width = `${Math.max(Math.min(score, 100), 0)}%`;
-  const tone = STRENGTH_STATES.find((tier) => score >= tier.min) ?? STRENGTH_STATES.at(-1);
-  const gradient = tone?.gradient ?? "linear-gradient(90deg, #22d3ee, #a855f7)";
+const TOGGLE_META = [
+  {
+    key:       "uppercase",
+    title:     "Uppercase (A–Z)",
+    onHelper:  "Adds emphasis and complexity",
+    offHelper: "Off — missing 26 possible characters per position",
+    entropy:   "+~4.7 bits",
+    setter:    "setIncludeUppercase",
+  },
+  {
+    key:       "lowercase",
+    title:     "Lowercase (a–z)",
+    onHelper:  "Keeps things readable",
+    offHelper: "Off — missing 26 possible characters per position",
+    entropy:   "+~4.7 bits",
+    setter:    "setIncludeLowercase",
+  },
+  {
+    key:       "numbers",
+    title:     "Numbers (0–9)",
+    onHelper:  "Great for entropy gains",
+    offHelper: "Off — missing 10 possible characters per position",
+    entropy:   "+~3.3 bits",
+    setter:    "setIncludeNumbers",
+  },
+  {
+    key:       "symbols",
+    title:     "Symbols (!@#…)",
+    onHelper:  "Sprinkle in special characters",
+    offHelper: "Off — missing 32 possible characters per position",
+    entropy:   "+~5.0 bits",
+    setter:    "setIncludeSymbols",
+  },
+];
 
-  return (
-    <div className="h-3 w-full overflow-hidden rounded-full bg-slate-800/80 ring-1 ring-white/10">
-      <div className="h-full transition-all duration-300 ease-out" style={{ width, backgroundImage: gradient }} />
-    </div>
-  );
-}
+const SCRAMBLE_CHARS =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
 
-function ToggleRow({ title, helper, checked, onChange }) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-white/5 px-4 py-3 transition hover:border-white/20">
-      <div className="space-y-0.5">
-        <p className="font-semibold text-slate-100">{title}</p>
-        <p className="text-xs text-slate-400">{helper}</p>
-      </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        onClick={() => onChange((prev) => !prev)}
-        className={`switch ${checked ? "switch--on" : ""}`}
-      >
-        <span className="switch__thumb" />
-      </button>
-    </div>
-  );
-}
+// Max entropy value used to scale the meter bar (128 bits)
+const ENTROPY_MAX_SCALE = 128;
+
+// ─── Utility helpers ──────────────────────────────────────────────────────────
 
 function buildCharset(options) {
-  let pool = "";
-  Object.entries(options).forEach(([key, enabled]) => {
-    if (enabled) pool += characterSets[key];
-  });
-  return pool;
+  return Object.entries(options)
+    .filter(([, enabled]) => enabled)
+    .map(([key]) => CHARACTER_SETS[key])
+    .join("");
 }
 
 function generateRandomPassword(pool, length) {
   if (!pool) return "";
-  const array = new Uint32Array(length);
-
-  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-    crypto.getRandomValues(array);
-  } else {
-    for (let i = 0; i < length; i += 1) {
-      array[i] = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
-    }
+  if (typeof crypto === "undefined" || !crypto.getRandomValues) {
+    throw new Error("Secure random number generation is not available in this browser.");
   }
-
+  const array = new Uint32Array(length);
+  crypto.getRandomValues(array);
   const chars = pool.split("");
-  return Array.from(array, (value) => chars[value % chars.length]).join("");
+  return Array.from(array, (v) => chars[v % chars.length]).join("");
 }
 
-function App() {
-  const [length, setLength] = useState(18);
+function calcEntropy(pool, length) {
+  const uniqueSize = new Set(pool).size || 1;
+  return pool ? Math.round(length * Math.log2(uniqueSize)) : 0;
+}
+
+function getEntropyTier(entropy) {
+  return ENTROPY_TIERS.find((t) => entropy >= t.min) ?? ENTROPY_TIERS.at(-1);
+}
+
+function estimateCrackTime(entropy) {
+  if (entropy <= 0) return "";
+  const guessesPerSec = 1e10; // 10 billion/sec
+  const seconds = Math.pow(2, entropy) / (2 * guessesPerSec);
+  if (seconds < 1)      return "< 1 second";
+  if (seconds < 60)     return `~${Math.round(seconds)} seconds`;
+  if (seconds < 3600)   return `~${Math.round(seconds / 60)} minutes`;
+  if (seconds < 86400)  return `~${Math.round(seconds / 3600)} hours`;
+  if (seconds < 3.156e7) return `~${Math.round(seconds / 86400)} days`;
+  if (seconds < 3.156e9) return `~${Math.round(seconds / 3.156e7)} years`;
+  if (seconds < 3.156e12) return `~${(seconds / 3.156e9).toFixed(1)} thousand years`;
+  if (seconds < 3.156e15) return `~${(seconds / 3.156e12).toFixed(1)} million years`;
+  if (seconds < 3.156e18) return `~${(seconds / 3.156e15).toFixed(1)} billion years`;
+  return `~${(seconds / 3.156e18).toFixed(1)} trillion years`;
+}
+
+function getContextTip(entropy, length, activeCount, allOn) {
+  if (activeCount === 0)
+    return { icon: "💡", text: "Pick at least one character set to start generating passwords." };
+  if (length < 12)
+    return { icon: "⚠️", text: "Short passwords are cracked in seconds — push to 16+ for real security." };
+  if (activeCount === 1)
+    return { icon: "⚠️", text: "Single charset drops entropy significantly — enable at least one more type." };
+  if (allOn && length > 20)
+    return { icon: "✅", text: "You're in excellent shape — this password is practically uncrackable." };
+  if (entropy < 60)
+    return { icon: "💡", text: "Enable more character sets or increase length to push into strong territory." };
+  return { icon: "✅", text: `${length} characters with ${activeCount} sets active — solid choice.` };
+}
+
+// ─── Scramble animation hook ──────────────────────────────────────────────────
+
+function useScramble(target, duration = 380) {
+  const [display, setDisplay] = useState(target);
+  const rafRef  = useRef(null);
+  const startRef = useRef(null);
+
+  useEffect(() => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (!target) { setDisplay(""); return; }
+
+    startRef.current = null;
+
+    const animate = (ts) => {
+      if (!startRef.current) startRef.current = ts;
+      const elapsed  = ts - startRef.current;
+      const progress = Math.min(elapsed / duration, 1);
+      const reveal   = Math.floor(progress * target.length);
+
+      const scrambled = target
+        .split("")
+        .map((ch, i) =>
+          i < reveal
+            ? ch
+            : SCRAMBLE_CHARS[Math.floor(Math.random() * SCRAMBLE_CHARS.length)]
+        )
+        .join("");
+
+      setDisplay(scrambled);
+      if (progress < 1) rafRef.current = requestAnimationFrame(animate);
+    };
+
+    rafRef.current = requestAnimationFrame(animate);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [target, duration]);
+
+  return display;
+}
+
+// ─── EntropyMeter component ───────────────────────────────────────────────────
+
+function EntropyMeter({ entropy }) {
+  const tier = getEntropyTier(entropy);
+  const pct  = Math.min(Math.max((entropy / ENTROPY_MAX_SCALE) * 100, 0), 100);
+
+  let fillGradient;
+  if (entropy <= 0)      fillGradient = "linear-gradient(90deg, #475569, #334155)";
+  else if (entropy < 40) fillGradient = "linear-gradient(90deg, #ef4444, #f97316)";
+  else if (entropy < 60) fillGradient = "linear-gradient(90deg, #f97316, #f59e0b)";
+  else if (entropy < 80) fillGradient = "linear-gradient(90deg, #f59e0b, #22d3ee)";
+  else                   fillGradient = "linear-gradient(90deg, #22d3ee, #10b981)";
+
+  return (
+    <div className="entropy-meter">
+      <div className="entropy-meter__header">
+        <span className="entropy-meter__label-left">
+          {/* Shield icon conveys strength even without color */}
+          {entropy <= 0 ? "🛡" : entropy < 40 ? "🛡" : entropy < 60 ? "🛡🛡" : entropy < 80 ? "🛡🛡🛡" : "🛡🛡🛡🛡"}
+          &nbsp;Entropy
+        </span>
+        <span className="entropy-meter__label-right" style={{ color: tier.color }}>
+          {entropy > 0 ? `${entropy} bits` : "—"}&nbsp;·&nbsp;
+          <strong>{tier.label}</strong>
+        </span>
+      </div>
+
+      <div className="entropy-meter__track" role="progressbar" aria-valuenow={entropy} aria-valuemin={0} aria-valuemax={128} aria-label={`Entropy: ${entropy} bits, ${tier.label}`}>
+        {/* Segmented zone backgrounds */}
+        <div className="entropy-meter__segments" aria-hidden="true">
+          <div className="em-seg em-seg--weak"        title="Weak (<40 bits)" />
+          <div className="em-seg em-seg--fair"        title="Fair (40–60 bits)" />
+          <div className="em-seg em-seg--strong"      title="Strong (60–80 bits)" />
+          <div className="em-seg em-seg--unbreakable" title="Unbreakable (80+ bits)" />
+        </div>
+        {/* Animated fill */}
+        <div
+          className="entropy-meter__fill"
+          style={{ width: `${pct}%`, backgroundImage: fillGradient }}
+        />
+      </div>
+
+      <div className="entropy-meter__zones" aria-hidden="true">
+        <span>Weak</span>
+        <span>Fair</span>
+        <span>Strong</span>
+        <span>Unbreakable</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── ToggleRow component ──────────────────────────────────────────────────────
+
+function ToggleRow({ id, title, onHelper, offHelper, entropyDelta, checked, onChange }) {
+  const [flash, setFlash] = useState(false);
+
+  const handleChange = useCallback(() => {
+    setFlash(true);
+    setTimeout(() => setFlash(false), 400);
+    onChange((prev) => !prev);
+  }, [onChange]);
+
+  return (
+    <div className={`toggle-row${flash ? " toggle-row--flash" : ""}${!checked ? " toggle-row--off" : ""}`}>
+      <div className="toggle-row__body">
+        <p className="toggle-row__title">{title}</p>
+        <p className="toggle-row__helper">{checked ? onHelper : offHelper}</p>
+      </div>
+      <div className="toggle-row__controls">
+        <span className={`entropy-delta${checked ? " entropy-delta--on" : " entropy-delta--off"}`} aria-hidden="true">
+          {entropyDelta}
+        </span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={checked}
+          aria-label={title}
+          id={id}
+          onClick={handleChange}
+          className={`switch${checked ? " switch--on" : ""}`}
+        >
+          <span className="switch__thumb" aria-hidden="true" />
+          <span className="switch__label">{checked ? "ON" : "OFF"}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+
+export default function App() {
+  const [length,           setLength]           = useState(18);
   const [includeUppercase, setIncludeUppercase] = useState(true);
   const [includeLowercase, setIncludeLowercase] = useState(true);
-  const [includeNumbers, setIncludeNumbers] = useState(true);
-  const [includeSymbols, setIncludeSymbols] = useState(true);
-  const [password, setPassword] = useState("");
-  const [entropy, setEntropy] = useState(0);
-  const [copied, setCopied] = useState(false);
+  const [includeNumbers,   setIncludeNumbers]   = useState(true);
+  const [includeSymbols,   setIncludeSymbols]   = useState(true);
+  const [password,         setPassword]         = useState("");
+  const [copied,           setCopied]           = useState(false);
+  const [showPassword,     setShowPassword]     = useState(true);
+  const [locked,           setLocked]           = useState(false);
+
+  const setterMap = {
+    setIncludeUppercase,
+    setIncludeLowercase,
+    setIncludeNumbers,
+    setIncludeSymbols,
+  };
 
   const options = useMemo(
     () => ({
       uppercase: includeUppercase,
       lowercase: includeLowercase,
-      numbers: includeNumbers,
-      symbols: includeSymbols,
+      numbers:   includeNumbers,
+      symbols:   includeSymbols,
     }),
-    [includeNumbers, includeSymbols, includeLowercase, includeUppercase],
+    [includeUppercase, includeLowercase, includeNumbers, includeSymbols],
   );
 
-  const pool = useMemo(() => buildCharset(options), [options]);
-  const strengthScore = pool ? Math.min(100, Math.round((entropy / 128) * 100)) : 0;
-  const tier = STRENGTH_STATES.find((state) => strengthScore >= state.min) ?? STRENGTH_STATES.at(-1);
+  const pool    = useMemo(() => buildCharset(options), [options]);
+  const entropy = useMemo(() => calcEntropy(pool, length), [pool, length]);
+  const crackTime  = useMemo(() => estimateCrackTime(entropy), [entropy]);
+  const activeCount = Object.values(options).filter(Boolean).length;
+  const allOn       = activeCount === 4;
 
-  const handleGenerate = () => {
-    const next = generateRandomPassword(pool, length);
-    setPassword(next);
-
-    const uniqueSetSize = new Set(pool).size || 1;
-    const bits = Math.round(length * Math.log2(uniqueSetSize));
-    setEntropy(bits);
+  const doGenerate = useCallback(() => {
+    if (!pool) { setPassword(""); return; }
+    setPassword(generateRandomPassword(pool, length));
     setCopied(false);
-  };
+  }, [pool, length]);
 
-  const handleCopy = async () => {
+  // Auto-generate on first load
+  useEffect(() => { doGenerate(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-regenerate when options or length change (unless locked).
+  // doGenerate is a useCallback tied to [pool, length], so this fires on those changes.
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) { isFirstRender.current = false; return; }
+    if (!locked) doGenerate();
+  }, [doGenerate, locked]);
+
+  const displayPassword = useScramble(password);
+
+  const handleCopy = useCallback(async () => {
     if (!password) return;
     try {
       await navigator.clipboard.writeText(password);
@@ -116,7 +312,12 @@ function App() {
     } catch (err) {
       console.error("Unable to copy", err);
     }
-  };
+  }, [password]);
+
+  const tip = getContextTip(entropy, length, activeCount, allOn);
+
+  // Slider background: red (short) → yellow (mid) → green (long)
+  const sliderBg = `linear-gradient(90deg, hsl(0,80%,55%) 0%, hsl(45,95%,55%) 40%, hsl(150,75%,45%) 80%, hsl(155,80%,42%) 100%)`;
 
   return (
     <div className="app-shell">
@@ -125,6 +326,8 @@ function App() {
       <div className="glow glow--three" />
 
       <div className="w-full max-w-5xl mx-auto space-y-8 relative">
+
+        {/* ── Header ── */}
         <header className="space-y-3 text-center">
           <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-4 py-1 text-sm text-emerald-200">
             <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -132,147 +335,190 @@ function App() {
           </div>
           <div className="space-y-2">
             <h1 className="text-4xl font-semibold text-slate-50 sm:text-5xl">PassForge</h1>
-            <p className="text-slate-300 text-base sm:text-lg">Craft resilient passwords with a brighter, modern workspace.</p>
+            <p className="text-slate-300 text-base sm:text-lg">
+              Craft resilient passwords with a brighter, modern workspace.
+            </p>
           </div>
         </header>
 
         <div className="glass-card p-6 sm:p-8 space-y-8">
           <div className="grid gap-8 md:grid-cols-5 items-start">
-            <div className="md:col-span-3 space-y-6">
-              <div className="rounded-2xl border border-white/5 bg-white/5 p-4 sm:p-5 shadow-inner">
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <div className="flex items-center gap-2 text-sm text-slate-300">
-                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-cyan-400/40 to-violet-500/40 text-cyan-100">
-                      🔒
-                    </span>
+
+            {/* ════════════ OUTPUT ZONE ════════════ */}
+            <div className="md:col-span-3 space-y-5">
+
+              {/* Password display box */}
+              <div className="pw-box">
+                {/* Header row */}
+                <div className="pw-box__header">
+                  <div className="pw-box__title-group">
+                    {/* Lock / pin toggle */}
+                    <button
+                      type="button"
+                      aria-label={locked ? "Unpin password — allow auto-regeneration" : "Pin password — freeze from auto-regeneration"}
+                      title={locked ? "Pinned. Click to allow auto-regeneration." : "Click to pin this password."}
+                      onClick={() => setLocked((v) => !v)}
+                      className={`lock-btn${locked ? " lock-btn--locked" : ""}`}
+                    >
+                      {locked ? "🔒" : "🔓"}
+                    </button>
                     <div>
-                      <p className="font-semibold text-slate-100">Generated password</p>
-                      <p className="text-xs text-slate-400">Copy or regenerate any time</p>
+                      <p className="pw-box__title">Generated password</p>
+                      <p className="pw-box__subtitle">
+                        {locked ? "Pinned — won't change when you adjust settings" : "Auto-regenerates as you adjust settings"}
+                      </p>
                     </div>
                   </div>
+                  {/* Reveal / hide */}
                   <button
                     type="button"
-                    onClick={handleCopy}
-                    className="rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-semibold text-slate-100 transition hover:border-cyan-400/50 hover:bg-cyan-400/10"
+                    aria-label={showPassword ? "Hide password" : "Reveal password"}
+                    title={showPassword ? "Hide password" : "Reveal password"}
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="reveal-btn"
                   >
-                    {copied ? "Copied" : "Copy"}
+                    {showPassword ? "👁 Hide" : "👁 Show"}
                   </button>
                 </div>
 
-                <div className="password-panel">
-                  <p className="password-text">{password || "Select your mix and generate something unbreakable."}</p>
-                </div>
-
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 text-sm text-slate-300">
-                    <span className="inline-flex h-2 w-2 rounded-full bg-cyan-300" />
-                    Entropy: <span className="font-semibold text-slate-50">{entropy} bits</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-slate-300">
-                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/10 text-lg">⚡</span>
-                    <span className="font-semibold text-slate-50">{tier.label}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <PasswordStrengthBar score={strengthScore} />
-                <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-300">
-                  <p className="flex items-center gap-2">
-                    <span className="inline-flex h-2 w-2 rounded-full bg-emerald-300" />
-                    {tier.hint}
+                {/* Password text */}
+                <div className="password-panel" aria-live="polite" aria-label="Generated password">
+                  <p className="password-text">
+                    {(() => {
+                      if (!showPassword) return password ? "•".repeat(password.length) : "\u00A0";
+                      return displayPassword || "\u00A0";
+                    })()}
                   </p>
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="inline-flex h-2 w-2 rounded-full bg-white/30" />
-                    Each bar reacts instantly to your choices
-                  </div>
+                  {password && (
+                    <span className="pw-char-count" aria-hidden="true">{password.length}</span>
+                  )}
                 </div>
+
+                {/* Crack-time line */}
+                {entropy > 0 && (
+                  <p className="crack-time-hint">
+                    ⏱ Crack time at 10B guesses/sec:&nbsp;
+                    <span className="crack-time-value">{crackTime}</span>
+                  </p>
+                )}
               </div>
 
+              {/* ── ENTROPY METER (headline feature) ── */}
+              <EntropyMeter entropy={entropy} />
+
+              {/* ── ACTION ZONE ── */}
               <div className="flex flex-wrap gap-3">
                 <button
                   type="button"
-                  onClick={handleGenerate}
-                  className="inline-flex w-full flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-400 via-blue-500 to-violet-600 px-4 py-3 text-base font-semibold text-white shadow-lg shadow-violet-900/40 transition hover:brightness-110"
+                  onClick={doGenerate}
+                  disabled={!pool}
+                  className="generate-btn"
+                  aria-label="Generate a fresh password"
                 >
+                  <span aria-hidden="true" className="generate-btn__icon">🎲</span>
                   Generate a fresh password
                 </button>
                 <button
                   type="button"
                   onClick={handleCopy}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-base font-semibold text-slate-100 transition hover:border-cyan-300/60 hover:bg-cyan-400/10"
+                  disabled={!password}
+                  className="copy-btn"
+                  aria-label="Copy password to clipboard"
                 >
-                  Copy to clipboard
+                  {copied ? "✅ Copied!" : "📋 Copy to clipboard"}
                 </button>
               </div>
             </div>
 
+            {/* ════════════ CONTROLS ZONE ════════════ */}
             <div className="md:col-span-2 space-y-4">
-              <div className="rounded-2xl border border-white/5 bg-white/5 p-5">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Length</p>
-                    <h2 className="text-2xl font-semibold text-slate-50">{length} characters</h2>
-                  </div>
-                  <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200">Range 4 - 64</span>
+
+              {/* Length slider */}
+              <div className="slider-card">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Length</p>
+                  <h2 className="text-2xl font-semibold text-slate-50">{length} characters</h2>
+                  {crackTime && (
+                    <p className="text-xs text-slate-500 mt-0.5">{crackTime} to crack</p>
+                  )}
                 </div>
 
-                <div className="mt-4 space-y-2">
-                  <input
-                    type="range"
-                    min={4}
-                    max={64}
-                    value={length}
-                    onChange={(e) => setLength(Number(e.target.value))}
-                    className="range-slider"
-                  />
-                  <div className="flex justify-between text-xs text-slate-400">
-                    <span>Short & quick</span>
-                    <span>Ultra strong</span>
+                <div className="mt-4 space-y-1">
+                  <div className="slider-wrap">
+                    <input
+                      type="range"
+                      min={4}
+                      max={64}
+                      value={length}
+                      onChange={(e) => setLength(Number(e.target.value))}
+                      className="range-slider"
+                      style={{ "--slider-bg": sliderBg }}
+                      aria-label={`Password length: ${length} characters`}
+                      aria-valuemin={4}
+                      aria-valuemax={64}
+                      aria-valuenow={length}
+                    />
+                    {/* Tick marks */}
+                    <div className="slider-ticks" aria-hidden="true">
+                      {[4, 8, 16, 32, 64].map((v) => (
+                        <span
+                          key={v}
+                          className="tick"
+                          style={{ left: `${((v - 4) / 60) * 100}%` }}
+                        >
+                          <span className="tick__bar" />
+                          <span className="tick__label">{v}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex justify-between text-xs text-slate-500 pt-6 px-0.5">
+                    <span>4</span>
+                    <span>64</span>
                   </div>
                 </div>
               </div>
 
+              {/* Character-set toggles */}
               <div className="space-y-3">
-                <ToggleRow
-                  title="Uppercase (A–Z)"
-                  helper="Adds emphasis and complexity"
-                  checked={includeUppercase}
-                  onChange={setIncludeUppercase}
-                />
-                <ToggleRow
-                  title="Lowercase (a–z)"
-                  helper="Keeps things readable"
-                  checked={includeLowercase}
-                  onChange={setIncludeLowercase}
-                />
-                <ToggleRow
-                  title="Numbers (0–9)"
-                  helper="Great for entropy gains"
-                  checked={includeNumbers}
-                  onChange={setIncludeNumbers}
-                />
-                <ToggleRow
-                  title="Symbols (!@#...)"
-                  helper="Sprinkle in special characters"
-                  checked={includeSymbols}
-                  onChange={setIncludeSymbols}
-                />
+                {TOGGLE_META.map((meta) => (
+                  <ToggleRow
+                    key={meta.key}
+                    id={`toggle-${meta.key}`}
+                    title={meta.title}
+                    onHelper={meta.onHelper}
+                    offHelper={meta.offHelper}
+                    entropyDelta={meta.entropy}
+                    checked={options[meta.key]}
+                    onChange={setterMap[meta.setter]}
+                  />
+                ))}
+
+                {/* Maximum mix indicator */}
+                {allOn && (
+                  <div className="max-mix-badge" role="status" aria-live="polite">
+                    <span aria-hidden="true">✨</span> Maximum mix — all character sets active
+                  </div>
+                )}
+
+                {/* Symbols-off contextual note */}
+                {!includeSymbols && (
+                  <div className="symbols-tip" role="note">
+                    💡 Some sites block special characters — symbols are off, which works great for those.
+                  </div>
+                )}
               </div>
 
-              <div className="rounded-xl border border-white/5 bg-white/5 p-4 text-sm text-slate-300 shadow-inner">
-                <p className="font-semibold text-slate-100 mb-1">Quick tip</p>
-                <p className="leading-relaxed">
-                  Aim for at least <span className="text-cyan-200 font-semibold">16 characters</span> with three different sets enabled. Mixing
-                  everything with a longer length pushes the entropy meter to green.
-                </p>
+              {/* Context-aware quick tip */}
+              <div className="tip-card">
+                <p className="tip-card__heading">{tip.icon} Quick tip</p>
+                <p className="tip-card__body">{tip.text}</p>
               </div>
             </div>
+
           </div>
         </div>
       </div>
     </div>
   );
 }
-
-export default App;
