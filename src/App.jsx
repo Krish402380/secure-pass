@@ -1,120 +1,276 @@
 // src/App.jsx
-import React from "react";
-import { ShieldCheck, RefreshCcw, ClipboardCopy } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
-import { Slider } from "@/components/ui/slider";
-import { Card, CardContent } from "@/components/ui/card";
-import { useState } from "react";
-
+import React, { useMemo, useState } from "react";
 import "./App.css";
 
-function PasswordStrengthBar({ strength }) {
-  const width = `${Math.min(strength, 100)}%`;
-  const bg = strength >= 80 ? "bg-green-500" : strength >= 50 ? "bg-yellow-500" : "bg-red-500";
+const STRENGTH_STATES = [
+  { min: 80, label: "Rock solid", gradient: "linear-gradient(90deg, #34d399, #22d3ee, #8b5cf6)", hint: "Ready for your most important accounts" },
+  { min: 55, label: "Strong", gradient: "linear-gradient(90deg, #38bdf8, #4f46e5)", hint: "Great mix of length and variety" },
+  { min: 35, label: "Okay", gradient: "linear-gradient(90deg, #f59e0b, #f97316, #fb7185)", hint: "Add symbols or length for extra safety" },
+  { min: 1, label: "Weak", gradient: "linear-gradient(90deg, #fb7185, #f97316)", hint: "Increase the length and enable more sets" },
+  { min: 0, label: "Awaiting options", gradient: "linear-gradient(90deg, #475569, #334155)", hint: "Pick at least one character set to start" },
+];
+
+const characterSets = {
+  uppercase: "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+  lowercase: "abcdefghijklmnopqrstuvwxyz",
+  numbers: "0123456789",
+  symbols: "!@#$%^&*()_+-=[]{}|;:',.<>/?",
+};
+
+function PasswordStrengthBar({ score }) {
+  const width = `${Math.max(Math.min(score, 100), 0)}%`;
+  const tone = STRENGTH_STATES.find((tier) => score >= tier.min) ?? STRENGTH_STATES.at(-1);
+  const gradient = tone?.gradient ?? "linear-gradient(90deg, #22d3ee, #a855f7)";
 
   return (
-    <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-      <div className={`h-full transition-all duration-300 ease-in-out ${bg}`} style={{ width }}></div>
+    <div className="h-3 w-full overflow-hidden rounded-full bg-slate-800/80 ring-1 ring-white/10">
+      <div className="h-full transition-all duration-300 ease-out" style={{ width, backgroundImage: gradient }} />
     </div>
   );
 }
 
+function ToggleRow({ title, helper, checked, onChange }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-white/5 px-4 py-3 transition hover:border-white/20">
+      <div className="space-y-0.5">
+        <p className="font-semibold text-slate-100">{title}</p>
+        <p className="text-xs text-slate-400">{helper}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange((prev) => !prev)}
+        className={`switch ${checked ? "switch--on" : ""}`}
+      >
+        <span className="switch__thumb" />
+      </button>
+    </div>
+  );
+}
+
+function buildCharset(options) {
+  let pool = "";
+  Object.entries(options).forEach(([key, enabled]) => {
+    if (enabled) pool += characterSets[key];
+  });
+  return pool;
+}
+
+function generateRandomPassword(pool, length) {
+  if (!pool) return "";
+  const array = new Uint32Array(length);
+
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    crypto.getRandomValues(array);
+  } else {
+    for (let i = 0; i < length; i += 1) {
+      array[i] = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+    }
+  }
+
+  const chars = pool.split("");
+  return Array.from(array, (value) => chars[value % chars.length]).join("");
+}
+
 function App() {
-  const [length, setLength] = useState(16);
+  const [length, setLength] = useState(18);
   const [includeUppercase, setIncludeUppercase] = useState(true);
   const [includeLowercase, setIncludeLowercase] = useState(true);
   const [includeNumbers, setIncludeNumbers] = useState(true);
   const [includeSymbols, setIncludeSymbols] = useState(true);
   const [password, setPassword] = useState("");
-  const [strength, setStrength] = useState(0);
+  const [entropy, setEntropy] = useState(0);
+  const [copied, setCopied] = useState(false);
 
-  const generatePassword = () => {
-    let charset = "";
-    if (includeUppercase) charset += "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    if (includeLowercase) charset += "abcdefghijklmnopqrstuvwxyz";
-    if (includeNumbers) charset += "0123456789";
-    if (includeSymbols) charset += "!@#$%^&*()_+-=[]{}|;:',.<>/?";
+  const options = useMemo(
+    () => ({
+      uppercase: includeUppercase,
+      lowercase: includeLowercase,
+      numbers: includeNumbers,
+      symbols: includeSymbols,
+    }),
+    [includeNumbers, includeSymbols, includeLowercase, includeUppercase],
+  );
 
-    if (!charset) return;
+  const pool = useMemo(() => buildCharset(options), [options]);
+  const strengthScore = pool ? Math.min(100, Math.round((entropy / 128) * 100)) : 0;
+  const tier = STRENGTH_STATES.find((state) => strengthScore >= state.min) ?? STRENGTH_STATES.at(-1);
 
-    let pwd = "";
-    for (let i = 0; i < length; i++) {
-      const randomIndex = Math.floor(Math.random() * charset.length);
-      pwd += charset[randomIndex];
-    }
-    setPassword(pwd);
-    const bits = Math.round(length * Math.log2(charset.length));
-    setStrength(bits > 128 ? 100 : Math.round((bits / 128) * 100));
+  const handleGenerate = () => {
+    const next = generateRandomPassword(pool, length);
+    setPassword(next);
+
+    const uniqueSetSize = new Set(pool).size || 1;
+    const bits = Math.round(length * Math.log2(uniqueSetSize));
+    setEntropy(bits);
+    setCopied(false);
   };
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(password);
+  const handleCopy = async () => {
+    if (!password) return;
+    try {
+      await navigator.clipboard.writeText(password);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch (err) {
+      console.error("Unable to copy", err);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <Card className="w-full max-w-xl shadow-xl rounded-2xl">
-        <CardContent className="p-6 space-y-6">
-          <div className="flex items-center gap-3">
-            <ShieldCheck className="h-10 w-10 text-primary" />
-            <div>
-              <h1 className="text-2xl font-bold font-headline text-foreground">PassForge</h1>
-              <p className="text-muted-foreground">Your secure password workspace.</p>
+    <div className="app-shell">
+      <div className="glow glow--one" />
+      <div className="glow glow--two" />
+      <div className="glow glow--three" />
+
+      <div className="w-full max-w-5xl mx-auto space-y-8 relative">
+        <header className="space-y-3 text-center">
+          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-4 py-1 text-sm text-emerald-200">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+            Live entropy tuning
+          </div>
+          <div className="space-y-2">
+            <h1 className="text-4xl font-semibold text-slate-50 sm:text-5xl">PassForge</h1>
+            <p className="text-slate-300 text-base sm:text-lg">Craft resilient passwords with a brighter, modern workspace.</p>
+          </div>
+        </header>
+
+        <div className="glass-card p-6 sm:p-8 space-y-8">
+          <div className="grid gap-8 md:grid-cols-5 items-start">
+            <div className="md:col-span-3 space-y-6">
+              <div className="rounded-2xl border border-white/5 bg-white/5 p-4 sm:p-5 shadow-inner">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-2 text-sm text-slate-300">
+                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-cyan-400/40 to-violet-500/40 text-cyan-100">
+                      🔒
+                    </span>
+                    <div>
+                      <p className="font-semibold text-slate-100">Generated password</p>
+                      <p className="text-xs text-slate-400">Copy or regenerate any time</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className="rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-semibold text-slate-100 transition hover:border-cyan-400/50 hover:bg-cyan-400/10"
+                  >
+                    {copied ? "Copied" : "Copy"}
+                  </button>
+                </div>
+
+                <div className="password-panel">
+                  <p className="password-text">{password || "Select your mix and generate something unbreakable."}</p>
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-sm text-slate-300">
+                    <span className="inline-flex h-2 w-2 rounded-full bg-cyan-300" />
+                    Entropy: <span className="font-semibold text-slate-50">{entropy} bits</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-slate-300">
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/10 text-lg">⚡</span>
+                    <span className="font-semibold text-slate-50">{tier.label}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <PasswordStrengthBar score={strengthScore} />
+                <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-300">
+                  <p className="flex items-center gap-2">
+                    <span className="inline-flex h-2 w-2 rounded-full bg-emerald-300" />
+                    {tier.hint}
+                  </p>
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="inline-flex h-2 w-2 rounded-full bg-white/30" />
+                    Each bar reacts instantly to your choices
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={handleGenerate}
+                  className="inline-flex w-full flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-400 via-blue-500 to-violet-600 px-4 py-3 text-base font-semibold text-white shadow-lg shadow-violet-900/40 transition hover:brightness-110"
+                >
+                  Generate a fresh password
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopy}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-base font-semibold text-slate-100 transition hover:border-cyan-300/60 hover:bg-cyan-400/10"
+                >
+                  Copy to clipboard
+                </button>
+              </div>
+            </div>
+
+            <div className="md:col-span-2 space-y-4">
+              <div className="rounded-2xl border border-white/5 bg-white/5 p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Length</p>
+                    <h2 className="text-2xl font-semibold text-slate-50">{length} characters</h2>
+                  </div>
+                  <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200">Range 4 - 64</span>
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  <input
+                    type="range"
+                    min={4}
+                    max={64}
+                    value={length}
+                    onChange={(e) => setLength(Number(e.target.value))}
+                    className="range-slider"
+                  />
+                  <div className="flex justify-between text-xs text-slate-400">
+                    <span>Short & quick</span>
+                    <span>Ultra strong</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <ToggleRow
+                  title="Uppercase (A–Z)"
+                  helper="Adds emphasis and complexity"
+                  checked={includeUppercase}
+                  onChange={setIncludeUppercase}
+                />
+                <ToggleRow
+                  title="Lowercase (a–z)"
+                  helper="Keeps things readable"
+                  checked={includeLowercase}
+                  onChange={setIncludeLowercase}
+                />
+                <ToggleRow
+                  title="Numbers (0–9)"
+                  helper="Great for entropy gains"
+                  checked={includeNumbers}
+                  onChange={setIncludeNumbers}
+                />
+                <ToggleRow
+                  title="Symbols (!@#...)"
+                  helper="Sprinkle in special characters"
+                  checked={includeSymbols}
+                  onChange={setIncludeSymbols}
+                />
+              </div>
+
+              <div className="rounded-xl border border-white/5 bg-white/5 p-4 text-sm text-slate-300 shadow-inner">
+                <p className="font-semibold text-slate-100 mb-1">Quick tip</p>
+                <p className="leading-relaxed">
+                  Aim for at least <span className="text-cyan-200 font-semibold">16 characters</span> with three different sets enabled. Mixing
+                  everything with a longer length pushes the entropy meter to green.
+                </p>
+              </div>
             </div>
           </div>
-
-          <div className="relative">
-            <input
-              readOnly
-              className="w-full p-3 pr-10 text-lg font-mono border rounded-lg bg-muted/20 text-foreground"
-              value={password}
-              placeholder="Your secure password"
-            />
-            <button onClick={copyToClipboard} className="absolute right-3 top-1/2 -translate-y-1/2">
-              <ClipboardCopy className="w-5 h-5 text-muted-foreground" />
-            </button>
-          </div>
-
-          <div className="space-y-1">
-            <PasswordStrengthBar strength={strength} />
-            <div className="text-right text-sm text-muted-foreground">
-              {strength > 80 ? "Very Strong" : strength > 50 ? "Strong" : strength > 30 ? "Weak" : "Very Weak"}
-            </div>
-          </div>
-
-          <div>
-            <label className="text-sm text-muted-foreground">Password Length</label>
-            <div className="flex items-center justify-between">
-              <Slider value={[length]} onValueChange={([val]) => setLength(val)} min={4} max={64} className="w-full" />
-              <span className="ml-3 text-sm text-primary font-bold w-6 text-right">{length}</span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm text-muted-foreground">
-            <div className="flex items-center justify-between">
-              <span>Uppercase (A–Z)</span>
-              <Switch checked={includeUppercase} onCheckedChange={setIncludeUppercase} />
-            </div>
-            <div className="flex items-center justify-between">
-              <span>Lowercase (a–z)</span>
-              <Switch checked={includeLowercase} onCheckedChange={setIncludeLowercase} />
-            </div>
-            <div className="flex items-center justify-between">
-              <span>Numbers (0–9)</span>
-              <Switch checked={includeNumbers} onCheckedChange={setIncludeNumbers} />
-            </div>
-            <div className="flex items-center justify-between">
-              <span>Symbols (!@#...)</span>
-              <Switch checked={includeSymbols} onCheckedChange={setIncludeSymbols} />
-            </div>
-          </div>
-
-          <Button onClick={generatePassword} className="w-full text-base font-semibold">
-            <RefreshCcw className="w-4 h-4 mr-2" /> Generate New
-          </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }
