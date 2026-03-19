@@ -1,6 +1,7 @@
 // src/App.jsx
 import React, { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import "./App.css";
+import HistoryPanel from "./components/HistoryPanel";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -261,12 +262,21 @@ export default function App() {
   const [showPassword,     setShowPassword]     = useState(true);
   const [locked,           setLocked]           = useState(false);
 
-  const setterMap = {
-    setIncludeUppercase,
-    setIncludeLowercase,
-    setIncludeNumbers,
-    setIncludeSymbols,
-  };
+  // ─── History state ──────────────────────────────────────────────────────────
+  const [history,          setHistory]          = useState([]);
+  const [historyCollapsed, setHistoryCollapsed] = useState(true);
+  const [leavingId,        setLeavingId]        = useState(null);
+  // Tracks whether the panel has ever auto-expanded (only happens once per session)
+  const hasAutoExpanded  = useRef(false);
+  // Suppresses the auto-regen effect after a Restore action
+  const isRestoring      = useRef(false);
+  // Ref always holding the latest rendered values — used in stable callbacks
+  const latestStateRef   = useRef({ password: "", options: {}, length: 18, entropy: 0 });
+  // Slider: capture pre-drag snapshot for history, debounce timer
+  const sliderSnapshotRef = useRef(null);
+  const sliderTimerRef    = useRef(null);
+
+  // (charset setters are accessed directly via history-aware wrapper callbacks below)
 
   const options = useMemo(
     () => ({
@@ -284,6 +294,9 @@ export default function App() {
   const activeCount = Object.values(options).filter(Boolean).length;
   const allOn       = activeCount === 4;
 
+  // Keep latestStateRef in sync on every render (used by stable callbacks to read current values)
+  latestStateRef.current = { password, options, length, entropy };
+
   const doGenerate = useCallback(() => {
     if (!pool) { setPassword(""); return; }
     setPassword(generateRandomPassword(pool, length));
@@ -298,21 +311,170 @@ export default function App() {
   const isFirstRender = useRef(true);
   useEffect(() => {
     if (isFirstRender.current) { isFirstRender.current = false; return; }
+    // Skip auto-regen after a Restore action (we already set the password directly)
+    if (isRestoring.current) { isRestoring.current = false; return; }
     if (!locked) doGenerate();
   }, [doGenerate, locked]);
 
-  const displayPassword = useScramble(password);
+  // ─── History helpers ──────────────────────────────────────────────────────
 
+  const addToHistory = useCallback((pwd, opts, len, ent) => {
+    if (!pwd || !pwd.trim()) return;
+    const tier = getEntropyTier(ent);
+    const entry = {
+      id:            `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      password:      pwd,
+      length:        len,
+      charsets:      { ...opts },
+      entropy:       ent,
+      strengthLabel: tier.label,
+      copiedAt:      null,
+      generatedAt:   new Date().toISOString(),
+    };
+    setHistory((prev) => {
+      // Remove any duplicate password string
+      const deduped = prev.filter((e) => e.password !== pwd);
+      // Prepend and cap at 10
+      return [entry, ...deduped].slice(0, 10);
+    });
+  }, []); // setHistory is a stable React setter
+
+  // Auto-expand panel when second entry is added (only the first time ever)
+  useEffect(() => {
+    if (history.length >= 2 && !hasAutoExpanded.current) {
+      hasAutoExpanded.current = true;
+      setHistoryCollapsed(false);
+    }
+  }, [history]);
+
+  // Generate button: add current password to history, then generate fresh
+  const handleGenerateClick = useCallback(() => {
+    const { password: pwd, options: opts, length: len, entropy: ent } = latestStateRef.current;
+    if (pwd) addToHistory(pwd, opts, len, ent);
+    doGenerate();
+  }, [addToHistory, doGenerate]);
+
+  // Charset toggle wrappers: add current password to history, then toggle
+  // Uses latestStateRef so these callbacks stay stable (no stale closures)
+  const handleUppercaseChange = useCallback((updater) => {
+    if (!locked) {
+      const { password: pwd, options: opts, length: len, entropy: ent } = latestStateRef.current;
+      if (pwd) addToHistory(pwd, opts, len, ent);
+    }
+    setIncludeUppercase(updater);
+  }, [locked, addToHistory]);
+
+  const handleLowercaseChange = useCallback((updater) => {
+    if (!locked) {
+      const { password: pwd, options: opts, length: len, entropy: ent } = latestStateRef.current;
+      if (pwd) addToHistory(pwd, opts, len, ent);
+    }
+    setIncludeLowercase(updater);
+  }, [locked, addToHistory]);
+
+  const handleNumbersChange = useCallback((updater) => {
+    if (!locked) {
+      const { password: pwd, options: opts, length: len, entropy: ent } = latestStateRef.current;
+      if (pwd) addToHistory(pwd, opts, len, ent);
+    }
+    setIncludeNumbers(updater);
+  }, [locked, addToHistory]);
+
+  const handleSymbolsChange = useCallback((updater) => {
+    if (!locked) {
+      const { password: pwd, options: opts, length: len, entropy: ent } = latestStateRef.current;
+      if (pwd) addToHistory(pwd, opts, len, ent);
+    }
+    setIncludeSymbols(updater);
+  }, [locked, addToHistory]);
+
+  // Map TOGGLE_META setter keys → history-aware handler callbacks
+  const historyAwareSetterMap = {
+    setIncludeUppercase: handleUppercaseChange,
+    setIncludeLowercase: handleLowercaseChange,
+    setIncludeNumbers:   handleNumbersChange,
+    setIncludeSymbols:   handleSymbolsChange,
+  };
+
+  // Slider: capture snapshot on mousedown; add to history on mouseup (debounced 300ms)
+  const handleSliderMouseDown = useCallback(() => {
+    const { password: pwd, options: opts, length: len, entropy: ent } = latestStateRef.current;
+    sliderSnapshotRef.current = { pwd, opts, len, ent };
+  }, []);
+
+  const handleSliderMouseUp = useCallback(() => {
+    if (sliderTimerRef.current) clearTimeout(sliderTimerRef.current);
+    const snap = sliderSnapshotRef.current;
+    sliderTimerRef.current = setTimeout(() => {
+      if (snap && snap.pwd) addToHistory(snap.pwd, snap.opts, snap.len, snap.ent);
+      sliderSnapshotRef.current = null;
+    }, 300);
+  }, [addToHistory]);
+
+  // Copy from main display: also mark copiedAt in history
   const handleCopy = useCallback(async () => {
     if (!password) return;
     try {
       await navigator.clipboard.writeText(password);
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
+      // Mark copiedAt in history (clear it from all other entries)
+      const now = new Date().toISOString();
+      setHistory((prev) =>
+        prev.map((e) => ({ ...e, copiedAt: e.password === password ? now : null }))
+      );
     } catch (err) {
       console.error("Unable to copy", err);
     }
   }, [password]);
+
+  // Copy from a history entry
+  const handleHistoryCopy = useCallback(async (entry) => {
+    try {
+      await navigator.clipboard.writeText(entry.password);
+      const now = new Date().toISOString();
+      setHistory((prev) =>
+        prev.map((e) => ({ ...e, copiedAt: e.id === entry.id ? now : null }))
+      );
+    } catch (err) {
+      console.error("Unable to copy from history", err);
+    }
+  }, []);
+
+  // Delete a single history entry (with leave animation)
+  const handleDeleteEntry = useCallback((id) => {
+    setLeavingId(id);
+    setTimeout(() => {
+      setHistory((prev) => {
+        const next = prev.filter((e) => e.id !== id);
+        if (next.length === 0) setHistoryCollapsed(true);
+        return next;
+      });
+      setLeavingId(null);
+    }, 150);
+  }, []);
+
+  // Clear all history entries
+  const handleClearAll = useCallback(() => {
+    setHistory([]);
+    setHistoryCollapsed(true);
+  }, []);
+
+  // Restore a history entry to the main display
+  const handleRestoreEntry = useCallback((entry) => {
+    // Set flag so the auto-regen effect skips the next fire
+    isRestoring.current = true;
+    setPassword(entry.password);
+    setLength(entry.length);
+    setIncludeUppercase(entry.charsets.uppercase);
+    setIncludeLowercase(entry.charsets.lowercase);
+    setIncludeNumbers(entry.charsets.numbers);
+    setIncludeSymbols(entry.charsets.symbols);
+    // Remove from history
+    setHistory((prev) => prev.filter((e) => e.id !== entry.id));
+  }, []);
+
+  const displayPassword = useScramble(password);
 
   const tip = getContextTip(entropy, length, activeCount, allOn);
 
@@ -410,7 +572,7 @@ export default function App() {
               <div className="flex flex-wrap gap-3">
                 <button
                   type="button"
-                  onClick={doGenerate}
+                  onClick={handleGenerateClick}
                   disabled={!pool}
                   className="generate-btn"
                   aria-label="Generate a fresh password"
@@ -451,6 +613,10 @@ export default function App() {
                       max={64}
                       value={length}
                       onChange={(e) => setLength(Number(e.target.value))}
+                      onMouseDown={handleSliderMouseDown}
+                      onTouchStart={handleSliderMouseDown}
+                      onMouseUp={handleSliderMouseUp}
+                      onTouchEnd={handleSliderMouseUp}
                       className="range-slider"
                       style={{ "--slider-bg": sliderBg }}
                       aria-label={`Password length: ${length} characters`}
@@ -490,7 +656,7 @@ export default function App() {
                     offHelper={meta.offHelper}
                     entropyDelta={meta.entropy}
                     checked={options[meta.key]}
-                    onChange={setterMap[meta.setter]}
+                    onChange={historyAwareSetterMap[meta.setter]}
                   />
                 ))}
 
@@ -518,6 +684,18 @@ export default function App() {
 
           </div>
         </div>
+
+        {/* ── SESSION HISTORY ── */}
+        <HistoryPanel
+          history={history}
+          collapsed={historyCollapsed}
+          leavingId={leavingId}
+          onToggleCollapse={() => setHistoryCollapsed((v) => !v)}
+          onCopy={handleHistoryCopy}
+          onDelete={handleDeleteEntry}
+          onRestore={handleRestoreEntry}
+          onClearAll={handleClearAll}
+        />
       </div>
     </div>
   );

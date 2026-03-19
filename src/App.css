@@ -650,3 +650,370 @@ body {
   margin: 0;
 }
 
+/* ─── History Panel ──────────────────────────────────────────────────────────── */
+
+.history-panel {
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+
+/* Header */
+.history-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.875rem 1.125rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+
+.history-panel__header:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.history-panel__header:focus-visible {
+  outline: 2px solid #22d3ee;
+  outline-offset: -2px;
+}
+
+.history-panel__header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.history-panel__title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #f1f5f9;
+  white-space: nowrap;
+}
+
+.history-panel__count {
+  font-size: 0.78rem;
+  color: #64748b;
+  font-family: ui-monospace, monospace;
+  white-space: nowrap;
+}
+
+.history-panel__header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+/* Chevron */
+.history-chevron {
+  font-size: 1.1rem;
+  color: #64748b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  transition: transform 0.2s ease, color 0.15s ease;
+  transform: rotate(0deg);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.history-chevron--open {
+  transform: rotate(90deg);
+}
+
+/* Body (collapsible) */
+.history-panel__body {
+  max-height: 2000px;
+  overflow: hidden;
+  transition: max-height 200ms ease;
+}
+
+.history-panel__body--collapsed {
+  max-height: 0;
+  transition: max-height 200ms ease;
+}
+
+/* Empty state */
+.history-empty {
+  margin: 0;
+  padding: 1.125rem 1.125rem 1.25rem;
+  font-size: 0.8rem;
+  color: #475569;
+  text-align: center;
+}
+
+/* List */
+.history-list {
+  padding: 0 0.5rem 0.5rem;
+}
+
+/* ─── History Entry ───────────────────────────────────────────────────────────── */
+
+@keyframes hist-entry-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes hist-entry-out {
+  from { opacity: 1; max-height: 80px; padding-top: 0.625rem; padding-bottom: 0.625rem; }
+  to   { opacity: 0; max-height: 0;    padding-top: 0;         padding-bottom: 0; }
+}
+
+.hist-entry {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  overflow: hidden;
+  animation: hist-entry-in 150ms ease-out both;
+}
+
+.hist-entry:hover {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.hist-entry--leaving {
+  animation: hist-entry-out 150ms ease-in both;
+  pointer-events: none;
+}
+
+/* Copied left-border highlight */
+.hist-entry__copied-bar {
+  position: absolute;
+  left: 0;
+  top: 20%;
+  bottom: 20%;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: #10b981;
+}
+
+/* Main content area */
+.hist-entry__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+/* Password row */
+.hist-entry__pw-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.hist-entry__pw-text {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.8rem;
+  color: #e2e8f0;
+  word-break: break-all;
+  line-height: 1.4;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Small filled dot for copied indicator */
+.hist-entry__copied-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+}
+
+/* Meta row */
+.hist-entry__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.hist-entry__entropy {
+  font-size: 0.68rem;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.hist-entry__time {
+  font-size: 0.68rem;
+  color: #475569;
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+/* Charset badges */
+.hist-badges {
+  display: flex;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.hist-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: #475569;
+  background: transparent;
+  line-height: 1;
+}
+
+.hist-badge--on {
+  background: rgba(34, 211, 238, 0.15);
+  border-color: rgba(34, 211, 238, 0.4);
+  color: #7dd3fc;
+}
+
+/* Action buttons */
+.hist-entry__actions {
+  display: flex;
+  gap: 0.25rem;
+  flex-shrink: 0;
+  /* Always visible on mobile (touch devices), hidden on desktop until hover */
+}
+
+@media (hover: hover) {
+  .hist-entry__actions {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+  }
+
+  .hist-entry__actions--visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.hist-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  color: inherit;
+}
+
+.hist-action-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.hist-action-btn:focus-visible {
+  outline: 2px solid #22d3ee;
+  outline-offset: 2px;
+}
+
+.hist-action-btn--danger:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+/* Clear all controls */
+.history-clear-btn {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: #94a3b8;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  transition: color 0.15s ease, background 0.15s ease;
+  white-space: nowrap;
+}
+
+.history-clear-btn:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.history-clear-btn:focus-visible {
+  outline: 2px solid #22d3ee;
+  outline-offset: 2px;
+}
+
+.history-clear-confirm {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.history-confirm-btn,
+.history-cancel-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.history-confirm-btn {
+  color: #ef4444;
+}
+
+.history-confirm-btn:hover {
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.history-cancel-btn {
+  color: #94a3b8;
+}
+
+.history-cancel-btn:hover {
+  color: #f1f5f9;
+}
+
+.history-confirm-btn:focus-visible,
+.history-cancel-btn:focus-visible {
+  outline: 2px solid #22d3ee;
+  outline-offset: 2px;
+}
+
+/* "History cleared" ephemeral message */
+@keyframes hist-cleared-fade {
+  0%   { opacity: 0; }
+  12%  { opacity: 1; }
+  75%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.history-panel__cleared-msg {
+  font-size: 0.825rem;
+  font-weight: 600;
+  color: #34d399;
+  animation: hist-cleared-fade 2s ease forwards;
+}
+
